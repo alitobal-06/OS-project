@@ -12,7 +12,7 @@ int main(int argc, char * argv[])
 
     FILE* pFile;
     pFile = fopen("processes.txt", "r");
-    
+
 
     // 2. Ask the user for the chosen scheduling algorithm and its parameters, if there are any.
     // 3. Initiate and create the scheduler and clock processes.
