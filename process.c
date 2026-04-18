@@ -1,17 +1,28 @@
 #include "headers.h"
+// #include <stdlib.h>
 
 /* Modify this file as needed*/
 int remainingtime;
 
 int main(int agrc, char * argv[])
 {
+    // Checks if remaining time was passed as argument
+    if (argc < 2)
+    {
+        return 1;
+    }
+
     initClk();
     
-    //TODO it needs to get the remaining time from somewhere
-    //remainingtime = ??;
+    remainingtime = atoi(argv[1]);
+    
+    int lastClk = getClk();
+
     while (remainingtime > 0)
     {
-        // remainingtime = ??;
+        while(getClk() == lastClk);
+        lastClk = getClk();
+        remainingtime--;
     }
     
     destroyClk(false);
