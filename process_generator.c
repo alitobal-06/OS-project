@@ -25,6 +25,25 @@ int main(int argc, char * argv[])
 
     sleep(1);
 
+    // Get scheduling algorithm and quantum if needed
+    char algo[10];
+    int quantum = 0;
+    printf("Choose scheduling algorithm:\n");
+    printf("1. HPF\n");
+    printf("2. RR\n");
+    printf("Enter algorithm (HPF/RR): ");
+    scanf("%s", algo);
+
+    if (strcmp(algo, "RR") == 0)
+    {
+        printf("Enter quantum: ");
+        scanf("%d", &quantum);
+    }
+     
+    char quantumStr[10];
+    sprintf(quantumStr, "%d", quantum);
+
+
     int schedulerId = fork();
     if (schedulerId == -1)
     {
@@ -33,7 +52,7 @@ int main(int argc, char * argv[])
     }
     else if (schedulerId == 0)
     {
-        execl("./scheduler.out", "scheduler.out", NULL);
+       execl("./scheduler.out", "scheduler.out", algo, quantumStr, NULL);
         perror("ERROR STARTING SCHEDULER!");
         return 1;
     }
@@ -49,7 +68,7 @@ int main(int argc, char * argv[])
         return 1;
     }
 
-    char* line;
+   char line[100]; // makntsh intialized
     while(fgets(line, sizeof(line), pFile))
     {
         if (line[0] == '#')

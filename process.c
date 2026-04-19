@@ -24,7 +24,8 @@ int main(int argc, char * argv[])
         lastClk = getClk();
         remainingtime--;
     }
-    
+
+    kill(getppid(), SIGUSR1); // signal parent that process has finished
     destroyClk(false);
     
     return 0;
