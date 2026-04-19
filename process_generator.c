@@ -70,6 +70,8 @@ int main(int argc, char * argv[])
         printf("Sent process %d at time %d\n", msg.id, getClk());
     }
 
+    fclose(pFile);
+
     destroyClk(true);
 }
 
