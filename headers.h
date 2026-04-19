@@ -66,11 +66,11 @@ void destroyClk(bool terminateAll)
     }
 }
 
-
-struct processData
+struct msgbuff
 {
-    int arrivaltime;
-    int priority;
-    int runningtime;
+    long mtype;
     int id;
+    int arrival;
+    int runtime;
+    int priority;
 };

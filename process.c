@@ -4,7 +4,7 @@
 /* Modify this file as needed*/
 int remainingtime;
 
-int main(int agrc, char * argv[])
+int main(int argc, char * argv[])
 {
     // Checks if remaining time was passed as argument
     if (argc < 2)
