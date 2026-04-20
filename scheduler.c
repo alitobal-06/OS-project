@@ -14,7 +14,7 @@ struct PCB {
     int waiting;
     int remaining;
     int priority;
-    int started; // flag tohandle the preemption in hpf 3lshan law bada2 may3mlsh fork tany y33ml SIGCONT
+    int started; // flag to handle the preemption in hpf 3lshan law bada2 may3mlsh fork tany y33ml SIGCONT
     int pid;
     int state;
     struct PCB *next;  // Pointer to the next PCB in the queue
@@ -28,9 +28,10 @@ int contextSwitchInProgress = 0;
 int contextSwitchStartTime = -1;
 struct PCB *pendingProcess = NULL;
 int generatorDone = 0;
+volatile sig_atomic_t processFinishedFlag = 0;
 int totalRuntime = 0;
 int totalWaiting = 0;
-int firstArrivalTime = -1;
+int firstStartTime = -1;
 int lastFinishTime = 0;
 int finishedCount = 0;
 double sumWTA = 0.0;
@@ -50,9 +51,9 @@ void writePerformanceFile()
     double avgWaiting = 0.0;
     double stdWTA = 0.0;
 
-    if (firstArrivalTime != -1 && lastFinishTime > firstArrivalTime)
+    if (firstStartTime != -1 && lastFinishTime > firstStartTime)
     {
-        cpuUtilization = ((double)totalRuntime / (lastFinishTime - firstArrivalTime)) * 100.0;
+        cpuUtilization = ((double)totalRuntime / (lastFinishTime - firstStartTime)) * 100.0;
     }
 
     if (finishedCount > 0)
@@ -232,17 +233,19 @@ void startContextSwitch(int currentTime, struct PCB *nextProcess)
     pendingProcess = nextProcess;
 }
 
-// process finished
-
-void sigUSR1Handler(int signum)
+void handleProcessFinish(int currentTime)
 {
+    int ta;
+    double wta;
+
     if (runningProcess == NULL)
         return;
-    runningProcess->state = FINISHED;
 
-    int currentTime = getClk();
-    int ta = currentTime - runningProcess->arrival;
-    double wta = (double)ta / runningProcess->runtime;
+    runningProcess->state = FINISHED;
+    runningProcess->remaining = 0;
+
+    ta = currentTime - runningProcess->arrival;
+    wta = (double)ta / runningProcess->runtime;
 
     finishedCount++;
     totalWaiting += runningProcess->waiting;
@@ -254,6 +257,13 @@ void sigUSR1Handler(int signum)
 
     free(runningProcess);
     runningProcess = NULL;
+}
+
+// process finished
+
+void sigUSR1Handler(int signum)
+{
+    processFinishedFlag = 1;
 }
 
 void clearSchedulerResources(int signum)
@@ -276,6 +286,9 @@ void runProcess(int currentTime, char *algo)
 {
     if (runningProcess->started == 0)
     {
+        if (firstStartTime == -1)
+            firstStartTime = currentTime;
+
         // first time → fork it
         runningProcess->started = 1;
         char remainingStr[10];
@@ -341,18 +354,17 @@ int main(int argc, char *argv[])
                     continue;
                 }
 
-                if (firstArrivalTime == -1 || msg.arrival < firstArrivalTime)
-                    firstArrivalTime = msg.arrival;
                 totalRuntime += msg.runtime;
 
                 // create a new PCB for this process
-                struct PCB *newProcess = (struct PCB *)malloc(sizeof(struct PCB));
+                struct PCB *newProcess = (struct PCB *)malloc(sizeof(struct PCB));  
                 newProcess->id = msg.id;
                 newProcess->arrival = msg.arrival;
                 newProcess->runtime = msg.runtime;
                 newProcess->remaining = msg.runtime;
                 newProcess->priority = msg.priority;
                 newProcess->waiting = 0;
+                newProcess->started = 0;
                 newProcess->state = READY;
                 newProcess->next = NULL;
 
@@ -361,42 +373,49 @@ int main(int argc, char *argv[])
                 printf("Process %d inserted into ready queue at time %d\n", newProcess->id, currentTime);
             }
 
-            // BLOCK 2  
+            if (processFinishedFlag)
+            {
+                processFinishedFlag = 0;
+                handleProcessFinish(currentTime);
+                quantumCounter = 0;
+            }
+
+            // BLOCK 2: handle context-switch overhead first
+            if (contextSwitchInProgress)
+            {
+                if ((currentTime - contextSwitchStartTime) >= CONTEXT_SWITCH_OVERHEAD)
+                {
+                    contextSwitchInProgress = 0;
+                    contextSwitchStartTime = -1;
+
+                    if (pendingProcess != NULL)
+                    {
+                        runningProcess = pendingProcess;
+                        pendingProcess = NULL;
+                        runningProcess->state = RUNNING;
+                        quantumCounter = 0;
+                        runProcess(currentTime, algo);
+                    }
+                }
+                continue;
+            }
+
+            // BLOCK 3
             // update waiting time for all processes in ready queue
             struct PCB *temp = readyQueue;
-               while (temp != NULL)
-                 {
-                  temp->waiting++;
-                   temp = temp->next;
-                 }
-            
-                 // BLOCK 3: update remaining time of running process
+            while (temp != NULL)
+            {
+                temp->waiting++;
+                temp = temp->next;
+            }
+
+            // BLOCK 4: update remaining time of running process
             if (runningProcess != NULL)
             {
                 runningProcess->remaining--;
             }
-
-             // BLOCK 3.5: handle context-switch overhead
-             if (contextSwitchInProgress)
-             {
-                 if ((currentTime - contextSwitchStartTime) >= CONTEXT_SWITCH_OVERHEAD)
-                 {
-                     contextSwitchInProgress = 0;
-                     contextSwitchStartTime = -1;
-
-                     if (pendingProcess != NULL)
-                     {
-                         runningProcess = pendingProcess;
-                         pendingProcess = NULL;
-                         runningProcess->state = RUNNING;
-                         quantumCounter = 0;
-                         runProcess(currentTime, algo);
-                     }
-                 }
-                 continue;
-             }
             
-                        // BLOCK 4: decide who runs
+                        // BLOCK 5: decide who runs
             if (runningProcess == NULL && readyQueue != NULL)
             {
                 // nothing running → pick from ready queue
