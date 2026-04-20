@@ -14,13 +14,13 @@ struct PCB {
     int waiting;
     int remaining;
     int priority;
-    int started; // flag to handle the preemption in hpf 3lshan law bada2 may3mlsh fork tany y33ml SIGCONT
+    int started; // Flag to handle the preemption in HPF to prevent reforking of process
     int pid;
     int state;
     struct PCB *next;  // Pointer to the next PCB in the queue
 };
 
-// globasl variables
+// global variables
 struct PCB *readyQueue = NULL;   
 struct PCB *runningProcess = NULL; 
 FILE *schedulerLog = NULL;

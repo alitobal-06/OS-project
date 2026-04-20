@@ -11,6 +11,39 @@ int main(int argc, char * argv[])
 {
     signal(SIGINT, clearResources);
 
+    
+    // Get scheduling algorithm and quantum if needed
+    char algo[10];
+    int quantum = 0;
+    printf("Choose scheduling algorithm:\n");
+    printf("1. HPF\n");
+    printf("2. RR\n");
+    printf("Enter algorithm (HPF/RR): ");
+    scanf("%s", algo);
+    
+    if (strcmp(algo, "RR") == 0)
+    {
+        printf("Enter quantum: ");
+        scanf("%d", &quantum);
+    }
+    
+    char quantumStr[10];
+    sprintf(quantumStr, "%d", quantum);
+    
+    
+    int schedulerId = fork();
+    if (schedulerId == -1)
+    {
+        perror("ERROR CREATING SCHEDULER!");
+        return 1;
+    }
+    else if (schedulerId == 0)
+    {
+        execl("./scheduler.out", "scheduler.out", algo, quantumStr, NULL);
+        perror("ERROR STARTING SCHEDULER!");
+        return 1;
+    }
+    
     int clkId = fork();
     if (clkId == -1)
     {
@@ -24,44 +57,11 @@ int main(int argc, char * argv[])
         return 1;
     }
 
-    sleep(1);
-
-    // Get scheduling algorithm and quantum if needed
-    char algo[10];
-    int quantum = 0;
-    printf("Choose scheduling algorithm:\n");
-    printf("1. HPF\n");
-    printf("2. RR\n");
-    printf("Enter algorithm (HPF/RR): ");
-    scanf("%s", algo);
-
-    if (strcmp(algo, "RR") == 0)
-    {
-        printf("Enter quantum: ");
-        scanf("%d", &quantum);
-    }
-     
-    char quantumStr[10];
-    sprintf(quantumStr, "%d", quantum);
-
-
-    int schedulerId = fork();
-    if (schedulerId == -1)
-    {
-        perror("ERROR CREATING SCHEDULER!");
-        return 1;
-    }
-    else if (schedulerId == 0)
-    {
-       execl("./scheduler.out", "scheduler.out", algo, quantumStr, NULL);
-        perror("ERROR STARTING SCHEDULER!");
-        return 1;
-    }
-
     initClk();
+    
     key_t key = ftok("keyfile", 65);
     msgq_id = msgget(key, IPC_CREAT | 0666);
-
+    
     FILE* pFile = fopen("processes.txt", "r");
     if (!pFile)
     {
@@ -91,6 +91,8 @@ int main(int argc, char * argv[])
     }
 
     fclose(pFile);
+
+    printf("Hello!");
 
     destroyClk(true);
 }
