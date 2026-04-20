@@ -27,6 +27,7 @@ FILE *schedulerLog = NULL;
 int contextSwitchInProgress = 0;
 int contextSwitchStartTime = -1;
 struct PCB *pendingProcess = NULL;
+int generatorDone = 0;
 int totalRuntime = 0;
 int totalWaiting = 0;
 int firstArrivalTime = -1;
@@ -323,7 +324,7 @@ int main(int argc, char *argv[])
    
     int lastClk = -1;
     int quantumCounter = 0;
-    while (1)
+    while (!(generatorDone && readyQueue == NULL && runningProcess == NULL && !contextSwitchInProgress))
     {
         int currentTime = getClk();
         if (currentTime != lastClk)
@@ -334,6 +335,12 @@ int main(int argc, char *argv[])
             struct msgbuff msg;
             while (msgrcv(msgq_id, &msg, sizeof(msg) - sizeof(long), 0, IPC_NOWAIT) != -1)
             {
+                if (msg.id == -1)
+                {
+                    generatorDone = 1;
+                    continue;
+                }
+
                 if (firstArrivalTime == -1 || msg.arrival < firstArrivalTime)
                     firstArrivalTime = msg.arrival;
                 totalRuntime += msg.runtime;
@@ -448,6 +455,12 @@ int main(int argc, char *argv[])
         }
     }
 
+    writePerformanceFile();
+    if (schedulerLog != NULL)
+    {
+        fclose(schedulerLog);
+        schedulerLog = NULL;
+    }
     destroyClk(true);
 }
 
