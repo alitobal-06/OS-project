@@ -1,8 +1,11 @@
 #include "headers.h"
+#include <string.h>
+#include <math.h>
 
 #define READY 0
 #define RUNNING 1
 #define FINISHED 2
+#define CONTEXT_SWITCH_OVERHEAD 1
 
 struct PCB {
     int id;
@@ -20,6 +23,154 @@ struct PCB {
 // globasl variables
 struct PCB *readyQueue = NULL;   
 struct PCB *runningProcess = NULL; 
+FILE *schedulerLog = NULL;
+int contextSwitchInProgress = 0;
+int contextSwitchStartTime = -1;
+struct PCB *pendingProcess = NULL;
+int totalRuntime = 0;
+int totalWaiting = 0;
+int firstArrivalTime = -1;
+int lastFinishTime = 0;
+int finishedCount = 0;
+double sumWTA = 0.0;
+double sumWTA2 = 0.0;
+
+void writePerformanceFile()
+{
+    FILE *perfFile = fopen("scheduler.perf", "w");
+    if (perfFile == NULL)
+    {
+        perror("ERROR OPENING scheduler.perf");
+        return;
+    }
+
+    double cpuUtilization = 0.0;
+    double avgWTA = 0.0;
+    double avgWaiting = 0.0;
+    double stdWTA = 0.0;
+
+    if (firstArrivalTime != -1 && lastFinishTime > firstArrivalTime)
+    {
+        cpuUtilization = ((double)totalRuntime / (lastFinishTime - firstArrivalTime)) * 100.0;
+    }
+
+    if (finishedCount > 0)
+    {
+        avgWTA = sumWTA / finishedCount;
+        avgWaiting = (double)totalWaiting / finishedCount;
+
+        double variance = (sumWTA2 / finishedCount) - (avgWTA * avgWTA);
+        if (variance < 0.0)
+            variance = 0.0;
+        stdWTA = sqrt(variance);
+    }
+
+    fprintf(perfFile, "CPU utilization = %.0f%%\n", cpuUtilization);
+    fprintf(perfFile, "Avg WTA = %.2f\n", avgWTA);
+    fprintf(perfFile, "Avg Waiting = %.0f\n", avgWaiting);
+    fprintf(perfFile, "Std WTA = %.2f\n", stdWTA);
+
+    fclose(perfFile);
+}
+
+void printStarted(int currentTime, struct PCB *process)
+{
+    printf("At time %d process %d started arr %d total %d remain %d wait %d\n",
+        currentTime,
+        process->id,
+        process->arrival,
+        process->runtime,
+        process->remaining,
+        process->waiting);
+
+    if (schedulerLog != NULL)
+    {
+        fprintf(schedulerLog, "At time %d process %d started arr %d total %d remain %d wait %d\n",
+            currentTime,
+            process->id,
+            process->arrival,
+            process->runtime,
+            process->remaining,
+            process->waiting);
+        fflush(schedulerLog);
+    }
+}
+
+void printStopped(int currentTime, struct PCB *process)
+{
+    printf("At time %d process %d stopped arr %d total %d remain %d wait %d\n",
+        currentTime,
+        process->id,
+        process->arrival,
+        process->runtime,
+        process->remaining,
+        process->waiting);
+
+    if (schedulerLog != NULL)
+    {
+        fprintf(schedulerLog, "At time %d process %d stopped arr %d total %d remain %d wait %d\n",
+            currentTime,
+            process->id,
+            process->arrival,
+            process->runtime,
+            process->remaining,
+            process->waiting);
+        fflush(schedulerLog);
+    }
+}
+
+void printFinished(int currentTime, struct PCB *process)
+{
+    int ta = currentTime - process->arrival;
+    float wta = (float)ta / process->runtime;
+
+    printf("At time %d process %d finished arr %d total %d remain %d wait %d TA %d WTA %.2f\n",
+        currentTime,
+        process->id,
+        process->arrival,
+        process->runtime,
+        process->remaining,
+        process->waiting,
+        ta,
+        wta);
+
+    if (schedulerLog != NULL)
+    {
+        fprintf(schedulerLog, "At time %d process %d finished arr %d total %d remain %d wait %d TA %d WTA %.2f\n",
+            currentTime,
+            process->id,
+            process->arrival,
+            process->runtime,
+            process->remaining,
+            process->waiting,
+            ta,
+            wta);
+        fflush(schedulerLog);
+    }
+}
+
+void printContinued(int currentTime, struct PCB *process)
+{
+    printf("At time %d process %d resumed arr %d total %d remain %d wait %d\n",
+        currentTime,
+        process->id,
+        process->arrival,
+        process->runtime,
+        process->remaining,
+        process->waiting);
+
+    if (schedulerLog != NULL)
+    {
+        fprintf(schedulerLog, "At time %d process %d resumed arr %d total %d remain %d wait %d\n",
+            currentTime,
+            process->id,
+            process->arrival,
+            process->runtime,
+            process->remaining,
+            process->waiting);
+        fflush(schedulerLog);
+    }
+}
 
 
 
@@ -40,6 +191,25 @@ void insertByPriority(struct PCB **head, struct PCB *newNode) {
     current->next = newNode;
 }
 
+
+void inertAtTail(struct PCB **head, struct PCB *newNode)
+{
+    newNode->next = NULL;
+    
+    if (*head == NULL)
+    {
+        *head = newNode;
+        return;
+    }
+    
+    struct PCB *current = *head;
+    while (current->next != NULL)
+    {
+        current = current->next;
+    }
+    current->next = newNode;
+}
+
 struct PCB *removeHead(struct PCB **head)
 {
     
@@ -51,6 +221,15 @@ struct PCB *removeHead(struct PCB **head)
     return temp;                
 }
 
+void startContextSwitch(int currentTime, struct PCB *nextProcess)
+{
+    if (nextProcess == NULL)
+        return;
+
+    contextSwitchInProgress = 1;
+    contextSwitchStartTime = currentTime;
+    pendingProcess = nextProcess;
+}
 
 // process finished
 
@@ -60,17 +239,33 @@ void sigUSR1Handler(int signum)
         return;
     runningProcess->state = FINISHED;
 
+    int currentTime = getClk();
+    int ta = currentTime - runningProcess->arrival;
+    double wta = (double)ta / runningProcess->runtime;
 
-    printf("At time %d process %d finished arr %d total %d remain %d wait %d\n",
-        getClk(),
-        runningProcess->id,
-        runningProcess->arrival,
-        runningProcess->runtime,
-        runningProcess->remaining,
-        runningProcess->waiting);
+    finishedCount++;
+    totalWaiting += runningProcess->waiting;
+    sumWTA += wta;
+    sumWTA2 += (wta * wta);
+    lastFinishTime = currentTime;
+
+    printFinished(currentTime, runningProcess);
 
     free(runningProcess);
     runningProcess = NULL;
+}
+
+void clearSchedulerResources(int signum)
+{
+    writePerformanceFile();
+
+    if (schedulerLog != NULL)
+    {
+        fclose(schedulerLog);
+        schedulerLog = NULL;
+    }
+    destroyClk(false);
+    exit(0);
 }
 
 
@@ -93,25 +288,13 @@ void runProcess(int currentTime, char *algo)
             exit(1);
         }
         runningProcess->pid = pid;
-        printf("At time %d process %d started arr %d total %d remain %d wait %d\n",
-            currentTime,
-            runningProcess->id,
-            runningProcess->arrival,
-            runningProcess->runtime,
-            runningProcess->remaining,
-            runningProcess->waiting);
+        printStarted(currentTime, runningProcess);
     }
     else
     {
         // was stopped before → resume it
         kill(runningProcess->pid, SIGCONT);
-        printf("At time %d process %d resumed arr %d total %d remain %d wait %d\n",
-            currentTime,
-            runningProcess->id,
-            runningProcess->arrival,
-            runningProcess->runtime,
-            runningProcess->remaining,
-            runningProcess->waiting);
+        printContinued(currentTime, runningProcess);
     }
 }
 
@@ -124,10 +307,18 @@ int main(int argc, char *argv[])
     int quantum = atoi(argv[2]);
     initClk();
     signal(SIGUSR1, sigUSR1Handler);
+    signal(SIGINT, clearSchedulerResources);
 
     
     key_t key = ftok("keyfile", 65);
     int msgq_id = msgget(key, IPC_CREAT | 0666);
+
+    schedulerLog = fopen("scheduler.log", "w");
+    if (schedulerLog == NULL)
+    {
+        perror("ERROR OPENING scheduler.log");
+        return 1;
+    }
 
    
     int lastClk = -1;
@@ -143,6 +334,10 @@ int main(int argc, char *argv[])
             struct msgbuff msg;
             while (msgrcv(msgq_id, &msg, sizeof(msg) - sizeof(long), 0, IPC_NOWAIT) != -1)
             {
+                if (firstArrivalTime == -1 || msg.arrival < firstArrivalTime)
+                    firstArrivalTime = msg.arrival;
+                totalRuntime += msg.runtime;
+
                 // create a new PCB for this process
                 struct PCB *newProcess = (struct PCB *)malloc(sizeof(struct PCB));
                 newProcess->id = msg.id;
@@ -173,6 +368,26 @@ int main(int argc, char *argv[])
             {
                 runningProcess->remaining--;
             }
+
+             // BLOCK 3.5: handle context-switch overhead
+             if (contextSwitchInProgress)
+             {
+                 if ((currentTime - contextSwitchStartTime) >= CONTEXT_SWITCH_OVERHEAD)
+                 {
+                     contextSwitchInProgress = 0;
+                     contextSwitchStartTime = -1;
+
+                     if (pendingProcess != NULL)
+                     {
+                         runningProcess = pendingProcess;
+                         pendingProcess = NULL;
+                         runningProcess->state = RUNNING;
+                         quantumCounter = 0;
+                         runProcess(currentTime, algo);
+                     }
+                 }
+                 continue;
+             }
             
                         // BLOCK 4: decide who runs
             if (runningProcess == NULL && readyQueue != NULL)
@@ -190,24 +405,20 @@ int main(int argc, char *argv[])
                     // preempt if higher priority process arrived
                     if (readyQueue->priority < runningProcess->priority)
                     {
+                          struct PCB *nextProcess;
+
                         // stop current
                         kill(runningProcess->pid, SIGSTOP);
                         runningProcess->state = READY;
-                        printf("At time %d process %d stopped arr %d total %d remain %d wait %d\n",
-                            currentTime,
-                            runningProcess->id,
-                            runningProcess->arrival,
-                            runningProcess->runtime,
-                            runningProcess->remaining,
-                            runningProcess->waiting);
+                        printStopped(currentTime, runningProcess);
 
                         // put back in ready queue
                         insertByPriority(&readyQueue, runningProcess);
 
-                        // run higher priority one
-                        runningProcess = removeHead(&readyQueue);
-                        runningProcess->state = RUNNING;
-                        runProcess(currentTime, algo);
+                          // context switch to higher priority one
+                          nextProcess = removeHead(&readyQueue);
+                          runningProcess = NULL;
+                          startContextSwitch(currentTime, nextProcess);
                     }
                 }
                 else if (strcmp(algo, "RR") == 0)
@@ -215,27 +426,20 @@ int main(int argc, char *argv[])
                     quantumCounter++;
                     if (quantumCounter >= quantum)
                     {
+                          struct PCB *nextProcess;
+
                         // quantum expired → stop current
                         kill(runningProcess->pid, SIGSTOP);
                         runningProcess->state = READY;
-                        printf("At time %d process %d stopped arr %d total %d remain %d wait %d\n",
-                            currentTime,
-                            runningProcess->id,
-                            runningProcess->arrival,
-                            runningProcess->runtime,
-                            runningProcess->remaining,
-                            runningProcess->waiting);
+                        printStopped(currentTime, runningProcess);
 
                         // put back at tail for RR
-                        // temporarily use insertByPriority
-                        // we will add insertAtTail later
-                        insertByPriority(&readyQueue, runningProcess);
+                        inertAtTail(&readyQueue, runningProcess);
 
-                        // run next
-                        runningProcess = removeHead(&readyQueue);
-                        runningProcess->state = RUNNING;
-                        quantumCounter = 0;
-                        runProcess(currentTime, algo);
+                          // context switch to next RR process
+                          nextProcess = removeHead(&readyQueue);
+                          runningProcess = NULL;
+                          startContextSwitch(currentTime, nextProcess);
                     }
                 }
             }
