@@ -55,19 +55,6 @@ int main(int argc, char * argv[])
     }
     
     
-    int schedulerId = fork();
-    if (schedulerId == -1)
-    {
-        perror("ERROR CREATING SCHEDULER!");
-        return 1;
-    }
-    else if (schedulerId == 0)
-    {
-        execl("./scheduler.out", "scheduler.out", algo, quantumStr, NULL);
-        perror("ERROR STARTING SCHEDULER!");
-        return 1;
-    }
-    
     int clkId = fork();
     if (clkId == -1)
     {
@@ -78,6 +65,19 @@ int main(int argc, char * argv[])
     {
         execl("./clk.out", "clk.out", NULL);
         perror("ERROR STARTING CLOCK!");
+        return 1;
+    }
+
+    int schedulerId = fork();
+    if (schedulerId == -1)
+    {
+        perror("ERROR CREATING SCHEDULER!");
+        return 1;
+    }
+    else if (schedulerId == 0)
+    {
+        execl("./scheduler.out", "scheduler.out", algo, quantumStr, NULL);
+        perror("ERROR STARTING SCHEDULER!");
         return 1;
     }
 
