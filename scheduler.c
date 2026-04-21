@@ -236,8 +236,7 @@ void startContextSwitch(struct PCB *nextProcess)
         return;
 
     contextSwitchInProgress = 1;
-    // Switch is initiated at a tick boundary, so count this tick toward overhead.
-    contextSwitchStartTime = getClk() - 1;
+    contextSwitchStartTime = getClk();
     pendingProcess = nextProcess;
 }
 
@@ -385,7 +384,7 @@ int main(int argc, char *argv[])
     }
 
    
-    int lastClk = -1;
+    int lastClk = getClk();
     int quantumCounter = 0;
     while (!(generatorDone && readyQueue == NULL && runningProcess == NULL && !contextSwitchInProgress))
     {
@@ -430,9 +429,18 @@ int main(int argc, char *argv[])
 
         if (processFinishedFlag)
         {
+            struct PCB *nextProcess = NULL;
+
             processFinishedFlag = 0;
             handleProcessFinish();
             quantumCounter = 0;
+
+            // A switch to another ready process after finish still costs overhead.
+            if (!contextSwitchInProgress && runningProcess == NULL && readyQueue != NULL)
+            {
+                nextProcess = removeHead(&readyQueue);
+                startContextSwitch(nextProcess);
+            }
         }
 
         // If CPU is idle and no context switch is in progress, dispatch immediately
