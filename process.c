@@ -13,15 +13,25 @@ int main(int argc, char * argv[])
     }
 
     initClk();
-    
     remainingtime = atoi(argv[1]);
     
     int lastClk = getClk();
+    int nowClk;
 
     while (remainingtime > 0)
     {
-        while(getClk() == lastClk);
-        lastClk = getClk();
+        nowClk = getClk();
+        if (nowClk == lastClk)
+            continue;
+
+        if ((nowClk - lastClk) > 1)
+        {
+            // Process was paused; resync to current clock without consuming CPU time.
+            lastClk = nowClk;
+            continue;
+        }
+
+        lastClk = nowClk;
         remainingtime--;
     }
 

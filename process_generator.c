@@ -68,6 +68,9 @@ int main(int argc, char * argv[])
         return 1;
     }
 
+    while (shmget(SHKEY, 4, 0444) == -1)
+        usleep(10000);
+
     int schedulerId = fork();
     if (schedulerId == -1)
     {
