@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <sys/wait.h>
 
 int msgq_id;
 void clearResources(int);
@@ -19,7 +20,12 @@ int main(int argc, char * argv[])
     printf("1. HPF\n");
     printf("2. RR\n");
     printf("Enter algorithm (HPF/RR): ");
-    scanf("%s", algo);
+    scanf("%9s", algo);
+
+    if (strcmp(algo, "1") == 0)
+        strcpy(algo, "HPF");
+    else if (strcmp(algo, "2") == 0)
+        strcpy(algo, "RR");
     
     if (strcmp(algo, "RR") == 0)
     {
@@ -29,6 +35,24 @@ int main(int argc, char * argv[])
     
     char quantumStr[10];
     sprintf(quantumStr, "%d", quantum);
+
+    FILE *keyFile = fopen("keyfile", "a");
+    if (keyFile != NULL)
+        fclose(keyFile);
+
+    key_t key = ftok("keyfile", 65);
+    if (key == -1)
+    {
+        perror("ERROR GENERATING KEY!");
+        return 1;
+    }
+
+    msgq_id = msgget(key, IPC_CREAT | 0666);
+    if (msgq_id == -1)
+    {
+        perror("ERROR CREATING MESSAGE QUEUE!");
+        return 1;
+    }
     
     
     int schedulerId = fork();
@@ -59,9 +83,6 @@ int main(int argc, char * argv[])
 
     initClk();
     
-    key_t key = ftok("keyfile", 65);
-    msgq_id = msgget(key, IPC_CREAT | 0666);
-    
     FILE* pFile = fopen("processes.txt", "r");
     if (!pFile)
     {
@@ -69,7 +90,7 @@ int main(int argc, char * argv[])
         return 1;
     }
 
-   char line[100]; // makntsh intialized
+    char line[100];
     while(fgets(line, sizeof(line), pFile))
     {
         if (line[0] == '#')
@@ -92,9 +113,19 @@ int main(int argc, char * argv[])
 
     fclose(pFile);
 
-    printf("Hello!");
+    {
+        struct msgbuff doneMsg;
+        doneMsg.mtype = 1;
+        doneMsg.id = -1;
+        doneMsg.arrival = 0;
+        doneMsg.runtime = 0;
+        doneMsg.priority = 0;
+        msgsnd(msgq_id, &doneMsg, sizeof(doneMsg) - sizeof(long), !IPC_NOWAIT);
+    }
 
-    destroyClk(true);
+    waitpid(schedulerId, NULL, 0);
+    destroyClk(false);
+    return 0;
 }
 
 void clearResources(int signum)
