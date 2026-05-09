@@ -49,14 +49,6 @@ void initClk()
 }
 
 
-/*
- * All process call this function at the end to release the communication
- * resources between them and the clock module.
- * Again, Remember that the clock is only emulation!
- * Input: terminateAll: a flag to indicate whether that this is the end of simulation.
- *                      It terminates the whole system and releases resources.
-*/
-
 void destroyClk(bool terminateAll)
 {
     shmdt(shmaddr);
