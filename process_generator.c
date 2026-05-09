@@ -12,26 +12,10 @@ int main(int argc, char * argv[])
 {
     signal(SIGINT, clearResources);
 
-    
-    // Get scheduling algorithm and quantum if needed
-    char algo[10];
+    /* Phase 2 is RR-only, so startup asks only for the RR quantum. */
     int quantum = 0;
-    printf("Choose scheduling algorithm:\n");
-    printf("1. HPF\n");
-    printf("2. RR\n");
-    printf("Enter algorithm (HPF/RR): ");
-    scanf("%9s", algo);
-
-    if (strcmp(algo, "1") == 0)
-        strcpy(algo, "HPF");
-    else if (strcmp(algo, "2") == 0)
-        strcpy(algo, "RR");
-    
-    if (strcmp(algo, "RR") == 0)
-    {
-        printf("Enter quantum: ");
-        scanf("%d", &quantum);
-    }
+    printf("Enter RR quantum: ");
+    scanf("%d", &quantum);
     
     char quantumStr[10];
     sprintf(quantumStr, "%d", quantum);
@@ -79,7 +63,7 @@ int main(int argc, char * argv[])
     }
     else if (schedulerId == 0)
     {
-        execl("./scheduler.out", "scheduler.out", algo, quantumStr, NULL);
+        execl("./scheduler.out", "scheduler.out", "RR", quantumStr, NULL);
         perror("ERROR STARTING SCHEDULER!");
         return 1;
     }
@@ -100,11 +84,21 @@ int main(int argc, char * argv[])
             continue;
         
         struct msgbuff msg;
-        sscanf(line, "%d\t%d\t%d\t%d",
-        &msg.id,
-        &msg.arrival,
-        &msg.runtime,
-        &msg.priority);
+        /*
+         * Phase 2 process format:
+         * id, arrival, runtime, priority, disk base page, virtual page limit.
+         */
+        if (sscanf(line, "%d\t%d\t%d\t%d\t%d\t%d",
+                   &msg.id,
+                   &msg.arrival,
+                   &msg.runtime,
+                   &msg.priority,
+                   &msg.base,
+                   &msg.limit) != 6)
+        {
+            printf("Invalid process line skipped: %s", line);
+            continue;
+        }
 
         msg.mtype = 1;
 
@@ -123,6 +117,8 @@ int main(int argc, char * argv[])
         doneMsg.arrival = 0;
         doneMsg.runtime = 0;
         doneMsg.priority = 0;
+        doneMsg.base = 0;
+        doneMsg.limit = 0;
         msgsnd(msgq_id, &doneMsg, sizeof(doneMsg) - sizeof(long), !IPC_NOWAIT);
     }
 

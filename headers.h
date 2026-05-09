@@ -15,6 +15,10 @@ typedef short bool;
 #define true 1
 #define false 0
 
+#define MMU_ACCESS_INVALID -1
+#define MMU_ACCESS_HIT 0
+#define MMU_ACCESS_PAGE_FAULT 1
+
 #define SHKEY 300
 
 
@@ -65,4 +69,14 @@ struct msgbuff
     int arrival;
     int runtime;
     int priority;
+    int base;
+    int limit;
 };
+
+/* Phase 2 MMU interface used by the RR scheduler. */
+void mmu_init(void);
+int mmu_start_process(int processId, int pageCount, int diskBase);
+int mmu_access(int processId, int virtualAddress, char operation);
+int mmu_handle_page_fault(int processId, int virtualAddress, char operation, int loadTime);
+void mmu_clear_reference_bits(void);
+void mmu_finish_process(int processId);

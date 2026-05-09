@@ -5,10 +5,12 @@
 #define READY 0
 #define RUNNING 1
 #define FINISHED 2
+#define BLOCKED 3
+
+#define INVALID_FRAME_NUMBER -1
 
 typedef enum
 {
-    ALGO_HPF,
     ALGO_RR
 } SchedulerAlgo;
 
@@ -20,6 +22,11 @@ struct PCB
     int waiting;
     int remaining;
     int priority;
+    int base;
+    int limit;
+    int pageTableFrame;
+    int consumedCpuTime;
+    int blockedUntil;
     int started;
     int pid;
     int state;
@@ -27,12 +34,13 @@ struct PCB
 };
 
 static struct PCB *readyQueue = NULL;
+static struct PCB *blockedQueue = NULL;
 static struct PCB *runningProcess = NULL;
 static FILE *schedulerLog = NULL;
 static volatile sig_atomic_t processFinishedFlag = 0;
 static int generatorDone = 0;
 
-static SchedulerAlgo schedulerAlgo = ALGO_HPF;
+static SchedulerAlgo schedulerAlgo = ALGO_RR;
 static int rrQuantum = 0;
 static int rrCounter = 0;
 static int lastDispatchClk = -1;
@@ -183,25 +191,6 @@ static void logFinished(struct PCB *process)
     }
 }
 
-static void insertByPriority(struct PCB **head, struct PCB *node)
-{
-    struct PCB *cur;
-
-    if (*head == NULL || node->priority < (*head)->priority)
-    {
-        node->next = *head;
-        *head = node;
-        return;
-    }
-
-    cur = *head;
-    while (cur->next != NULL && cur->next->priority < node->priority)
-        cur = cur->next;
-
-    node->next = cur->next;
-    cur->next = node;
-}
-
 static void insertAtTail(struct PCB **head, struct PCB *node)
 {
     struct PCB *cur;
@@ -241,6 +230,15 @@ static void incrementReadyWaiting(void)
     }
 }
 
+static void enqueueReadyProcess(struct PCB *process)
+{
+    if (process == NULL)
+        return;
+
+    process->state = READY;
+    insertAtTail(&readyQueue, process);
+}
+
 static void createAndEnqueueProcess(struct msgbuff *msg)
 {
     struct PCB *node = (struct PCB *)malloc(sizeof(struct PCB));
@@ -255,6 +253,11 @@ static void createAndEnqueueProcess(struct msgbuff *msg)
     node->runtime = msg->runtime;
     node->remaining = msg->runtime;
     node->priority = msg->priority;
+    node->base = msg->base;
+    node->limit = msg->limit;
+    node->pageTableFrame = INVALID_FRAME_NUMBER;
+    node->consumedCpuTime = 0;
+    node->blockedUntil = -1;
     node->waiting = 0;
     node->started = 0;
     node->pid = -1;
@@ -263,12 +266,13 @@ static void createAndEnqueueProcess(struct msgbuff *msg)
 
     totalRuntime += node->runtime;
 
-    if (schedulerAlgo == ALGO_HPF)
-        insertByPriority(&readyQueue, node);
-    else
-        insertAtTail(&readyQueue, node);
+    enqueueReadyProcess(node);
 
-    printf("Process %d inserted into ready queue at time %d\n", node->id, getClk());
+    printf("Process %d inserted into ready queue at time %d base %d limit %d\n",
+           node->id,
+           getClk(),
+           node->base,
+           node->limit);
 }
 
 static void drainIncomingProcesses(int msgq_id)
@@ -304,6 +308,22 @@ static void startOrResumeRunningProcess(void)
 
     if (runningProcess->started == 0)
     {
+        /*
+         * Phase 2 memory setup: each process owns a page table frame and
+         * starts with virtual page 0 loaded. The MMU module owns the details.
+         */
+        runningProcess->pageTableFrame = mmu_start_process(runningProcess->id,
+                                                           runningProcess->limit,
+                                                           runningProcess->base);
+        if (runningProcess->pageTableFrame == INVALID_FRAME_NUMBER)
+        {
+            perror("ERROR STARTING PROCESS MEMORY!");
+            runningProcess->state = FINISHED;
+            free(runningProcess);
+            runningProcess = NULL;
+            return;
+        }
+
         runningProcess->started = 1;
         sprintf(remStr, "%d", runningProcess->remaining);
         pid = fork();
@@ -372,15 +392,91 @@ static void stopAndRequeueRunningProcess(void)
         return;
 
     kill(runningProcess->pid, SIGSTOP);
-    runningProcess->state = READY;
     logStopped(runningProcess);
 
-    if (schedulerAlgo == ALGO_HPF)
-        insertByPriority(&readyQueue, runningProcess);
-    else
-        insertAtTail(&readyQueue, runningProcess);
+    enqueueReadyProcess(runningProcess);
 
     runningProcess = NULL;
+}
+
+/*
+ * Phase 2 page-fault scheduler path.
+ * Person 3 can call this after a request causes mmu_access() to report a
+ * page fault. The faulting process leaves the CPU and returns after diskDelay.
+ */
+static void blockRunningProcessForPageFault(int diskDelay)
+{
+    if (runningProcess == NULL)
+        return;
+
+    if (runningProcess->pid > 0)
+        kill(runningProcess->pid, SIGSTOP);
+
+    runningProcess->state = BLOCKED;
+    runningProcess->blockedUntil = getClk() + diskDelay;
+    rrCounter = 0;
+    insertAtTail(&blockedQueue, runningProcess);
+    runningProcess = NULL;
+
+    if (!contextSwitchInProgress && readyQueue != NULL)
+        beginContextSwitch(popHead(&readyQueue));
+}
+
+static void releaseUnblockedProcesses(void)
+{
+    struct PCB *cur = blockedQueue;
+    struct PCB *prev = NULL;
+    int now = getClk();
+
+    while (cur != NULL)
+    {
+        struct PCB *next = cur->next;
+
+        if (cur->blockedUntil <= now)
+        {
+            if (prev == NULL)
+                blockedQueue = next;
+            else
+                prev->next = next;
+
+            cur->next = NULL;
+            cur->blockedUntil = -1;
+            enqueueReadyProcess(cur);
+        }
+        else
+        {
+            prev = cur;
+        }
+
+        cur = next;
+    }
+}
+
+/*
+ * Runs one memory request for the currently running process.
+ * Request parsing belongs to Person 3; once a request is due, call this helper.
+ */
+static void handleRunningMemoryAccess(int virtualAddress, char operation)
+{
+    int accessResult;
+    int diskDelay;
+
+    if (runningProcess == NULL)
+        return;
+
+    accessResult = mmu_access(runningProcess->id, virtualAddress, operation);
+    if (accessResult == MMU_ACCESS_HIT)
+        return;
+
+    if (accessResult != MMU_ACCESS_PAGE_FAULT)
+        return;
+
+    diskDelay = mmu_handle_page_fault(runningProcess->id,
+                                      virtualAddress,
+                                      operation,
+                                      getClk());
+    if (diskDelay > 0)
+        blockRunningProcessForPageFault(diskDelay);
 }
 
 static void handleFinishedProcess(void)
@@ -406,6 +502,7 @@ static void handleFinishedProcess(void)
     lastFinishTime = now;
 
     logFinished(runningProcess);
+    mmu_finish_process(runningProcess->id);
     free(runningProcess);
     runningProcess = NULL;
     rrCounter = 0;
@@ -427,8 +524,14 @@ static void accountOneClockTick(void)
         return;
 
     runningProcess->remaining--;
-    if (schedulerAlgo == ALGO_RR)
-        rrCounter++;
+    runningProcess->consumedCpuTime++;
+    rrCounter++;
+
+    /*
+     * Phase 2 integration point for Person 3:
+     * check requests whose relative time == consumedCpuTime here, then pass
+     * each due request to handleRunningMemoryAccess(address, operation).
+     */
 }
 
 static void preemptIfNeeded(void)
@@ -439,17 +542,7 @@ static void preemptIfNeeded(void)
     if (runningProcess->remaining <= 0)
         return;
 
-    if (schedulerAlgo == ALGO_HPF)
-    {
-        if (readyQueue->priority < runningProcess->priority)
-        {
-            stopAndRequeueRunningProcess();
-            beginContextSwitch(popHead(&readyQueue));
-        }
-        return;
-    }
-
-    if (schedulerAlgo == ALGO_RR && rrCounter >= rrQuantum)
+    if (rrCounter >= rrQuantum)
     {
         stopAndRequeueRunningProcess();
         beginContextSwitch(popHead(&readyQueue));
@@ -464,13 +557,6 @@ static int parseSchedulerArgs(int argc, char *argv[])
         return 0;
     }
 
-    if (strcmp(argv[1], "HPF") == 0)
-    {
-        schedulerAlgo = ALGO_HPF;
-        rrQuantum = 0;
-        return 1;
-    }
-
     if (strcmp(argv[1], "RR") == 0)
     {
         schedulerAlgo = ALGO_RR;
@@ -483,7 +569,7 @@ static int parseSchedulerArgs(int argc, char *argv[])
         return 1;
     }
 
-    perror("INVALID SCHEDULING ALGORITHM!");
+    perror("PHASE 2 SUPPORTS RR ONLY!");
     return 0;
 }
 
@@ -544,6 +630,7 @@ int main(int argc, char *argv[])
         return 1;
 
     initClk();
+    mmu_init();
     signal(SIGUSR1, sigUSR1Handler);
     signal(SIGINT, clearSchedulerResources);
 
@@ -556,9 +643,10 @@ int main(int argc, char *argv[])
 
     lastClk = getClk();
 
-    while (!(generatorDone && readyQueue == NULL && runningProcess == NULL && !contextSwitchInProgress && pendingProcess == NULL))
+    while (!(generatorDone && readyQueue == NULL && blockedQueue == NULL && runningProcess == NULL && !contextSwitchInProgress && pendingProcess == NULL))
     {
         drainIncomingProcesses(msgq_id);
+        releaseUnblockedProcesses();
 
         if (processFinishedFlag)
         {
@@ -572,6 +660,7 @@ int main(int argc, char *argv[])
         if (getClk() != lastClk)
         {
             lastClk = getClk();
+            releaseUnblockedProcesses();
             completeContextSwitchIfReady();
             accountOneClockTick();
 
@@ -598,4 +687,3 @@ int main(int argc, char *argv[])
     destroyClk(true);
     return 0;
 }
-
