@@ -14,6 +14,13 @@ typedef enum
     ALGO_RR
 } SchedulerAlgo;
 
+#define MAX_REQUESTS_PER_PROCESS 100
+
+struct MemoryRequest {
+    int time;
+    int address;
+    char operation;
+};
 struct PCB
 {
     int id;
@@ -30,6 +37,10 @@ struct PCB
     int started;
     int pid;
     int state;
+    /* Phase 2: Person 3 - Memory Request Tracking */
+    struct MemoryRequest requests[MAX_REQUESTS_PER_PROCESS];
+    int requestCount;
+    int nextRequestIndex;
     struct PCB *next;
 };
 
@@ -55,6 +66,8 @@ static int lastFinishTime = 0;
 static int finishedCount = 0;
 static double sumWTA = 0.0;
 static double sumWTA2 = 0.0;
+static int kQuantumsToClear = 0;
+static int quantumsSinceLastClear = 0;
 
 static void writePerformanceFile(void)
 {
@@ -95,70 +108,70 @@ static void writePerformanceFile(void)
 static void logStarted(struct PCB *process)
 {
     int now = getClk();
-    printf("At time %d process %d started arr %d total %d remain %d wait %d\n",
-           now,
-           process->id,
-           process->arrival,
-           process->runtime,
-           process->remaining,
-           process->waiting);
-    if (schedulerLog != NULL)
-    {
-        fprintf(schedulerLog, "At time %d process %d started arr %d total %d remain %d wait %d\n",
-                now,
-                process->id,
-                process->arrival,
-                process->runtime,
-                process->remaining,
-                process->waiting);
-        fflush(schedulerLog);
-    }
+    // printf("At time %d process %d started arr %d total %d remain %d wait %d\n",
+    //        now,
+    //        process->id,
+    //        process->arrival,
+    //        process->runtime,
+    //        process->remaining,
+    //        process->waiting);
+    // if (schedulerLog != NULL)
+    // {
+    //     fprintf(schedulerLog, "At time %d process %d started arr %d total %d remain %d wait %d\n",
+    //             now,
+    //             process->id,
+    //             process->arrival,
+    //             process->runtime,
+    //             process->remaining,
+    //             process->waiting);
+    //     fflush(schedulerLog);
+    // }
 }
 
 static void logStopped(struct PCB *process)
 {
     int now = getClk();
-    printf("At time %d process %d stopped arr %d total %d remain %d wait %d\n",
-           now,
-           process->id,
-           process->arrival,
-           process->runtime,
-           process->remaining,
-           process->waiting);
-    if (schedulerLog != NULL)
-    {
-        fprintf(schedulerLog, "At time %d process %d stopped arr %d total %d remain %d wait %d\n",
-                now,
-                process->id,
-                process->arrival,
-                process->runtime,
-                process->remaining,
-                process->waiting);
-        fflush(schedulerLog);
-    }
+    // printf("At time %d process %d stopped arr %d total %d remain %d wait %d\n",
+    //        now,
+    //        process->id,
+    //        process->arrival,
+    //        process->runtime,
+    //        process->remaining,
+    //        process->waiting);
+    // if (schedulerLog != NULL)
+    // {
+    //     fprintf(schedulerLog, "At time %d process %d stopped arr %d total %d remain %d wait %d\n",
+    //             now,
+    //             process->id,
+    //             process->arrival,
+    //             process->runtime,
+    //             process->remaining,
+    //             process->waiting);
+    //     fflush(schedulerLog);
+    // }
 }
 
 static void logResumed(struct PCB *process)
 {
     int now = getClk();
-    printf("At time %d process %d resumed arr %d total %d remain %d wait %d\n",
-           now,
-           process->id,
-           process->arrival,
-           process->runtime,
-           process->remaining,
-           process->waiting);
-    if (schedulerLog != NULL)
-    {
-        fprintf(schedulerLog, "At time %d process %d resumed arr %d total %d remain %d wait %d\n",
-                now,
-                process->id,
-                process->arrival,
-                process->runtime,
-                process->remaining,
-                process->waiting);
-        fflush(schedulerLog);
-    }
+    // printf("At time %d process %d resumed arr %d total %d remain %d wait %d\n",
+    //        now,
+    //        process->id,
+    //        process->arrival,
+    //        process->runtime,
+    //        process->remaining,
+    //        process->waiting);
+    // if (schedulerLog != NULL)
+    // {
+    //     fprintf(schedulerLog, "At time %d process %d resumed arr %d total %d remain %d wait %d\n",
+    //             now,
+    //             process->id,
+    //             process->arrival,
+    //             process->runtime,
+    //             process->remaining,
+    //             process->waiting);
+    //     fflush(schedulerLog);
+    // }
 }
 
 static void logFinished(struct PCB *process)
@@ -167,28 +180,28 @@ static void logFinished(struct PCB *process)
     int ta = now - process->arrival;
     double wta = (double)ta / process->runtime;
 
-    printf("At time %d process %d finished arr %d total %d remain %d wait %d TA %d WTA %.2f\n",
-           now,
-           process->id,
-           process->arrival,
-           process->runtime,
-           process->remaining,
-           process->waiting,
-           ta,
-           wta);
-    if (schedulerLog != NULL)
-    {
-        fprintf(schedulerLog, "At time %d process %d finished arr %d total %d remain %d wait %d TA %d WTA %.2f\n",
-                now,
-                process->id,
-                process->arrival,
-                process->runtime,
-                process->remaining,
-                process->waiting,
-                ta,
-                wta);
-        fflush(schedulerLog);
-    }
+    // printf("At time %d process %d finished arr %d total %d remain %d wait %d TA %d WTA %.2f\n",
+    //        now,
+    //        process->id,
+    //        process->arrival,
+    //        process->runtime,
+    //        process->remaining,
+    //        process->waiting,
+    //        ta,
+    //        wta);
+    // if (schedulerLog != NULL)
+    // {
+    //     // fprintf(schedulerLog, "At time %d process %d finished arr %d total %d remain %d wait %d TA %d WTA %.2f\n",
+    //     //         now,
+    //     //         process->id,
+    //     //         process->arrival,
+    //     //         process->runtime,
+    //     //         process->remaining,
+    //     //         process->waiting,
+    //     //         ta,
+    //     //         wta);
+    //     // fflush(schedulerLog);
+    // }
 }
 
 static void insertAtTail(struct PCB **head, struct PCB *node)
@@ -239,6 +252,47 @@ static void enqueueReadyProcess(struct PCB *process)
     insertAtTail(&readyQueue, process);
 }
 
+static void loadProcessRequests(struct PCB *process) {
+    char filename[64];
+    sprintf(filename, "requests_%d.txt", process->id);
+    
+    FILE *reqFile = fopen(filename, "r");
+    process->requestCount = 0;
+    process->nextRequestIndex = 0;
+
+    if (reqFile == NULL) {
+        printf("No request file found for process %d (%s)\n", process->id, filename);
+        return;
+    }
+
+    char line[128];
+    while (fgets(line, sizeof(line), reqFile)) {
+        // Skip comments and empty lines
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') {
+            continue;
+        }
+
+        int time;
+        char binAddr[32];
+        char op;
+
+        if (sscanf(line, "%d %31s %c", &time, binAddr, &op) == 3) {
+            int idx = process->requestCount;
+            if (idx >= MAX_REQUESTS_PER_PROCESS) {
+                printf("Warning: Process %d exceeded max requests limit.\n", process->id);
+                break;
+            }
+            
+            process->requests[idx].time = time;
+            // Convert binary string to integer
+            process->requests[idx].address = (int)strtol(binAddr, NULL, 2);
+            process->requests[idx].operation = op;
+            
+            process->requestCount++;
+        }
+    }
+    fclose(reqFile);
+}
 static void createAndEnqueueProcess(struct msgbuff *msg)
 {
     struct PCB *node = (struct PCB *)malloc(sizeof(struct PCB));
@@ -263,16 +317,17 @@ static void createAndEnqueueProcess(struct msgbuff *msg)
     node->pid = -1;
     node->state = READY;
     node->next = NULL;
+   loadProcessRequests(node);
 
     totalRuntime += node->runtime;
-
+ 
     enqueueReadyProcess(node);
 
-    printf("Process %d inserted into ready queue at time %d base %d limit %d\n",
-           node->id,
-           getClk(),
-           node->base,
-           node->limit);
+    // printf("Process %d inserted into ready queue at time %d base %d limit %d\n",
+    //        node->id,
+    //        getClk(),
+    //        node->base,
+    //        node->limit);
 }
 
 static void drainIncomingProcesses(int msgq_id)
@@ -441,6 +496,11 @@ static void releaseUnblockedProcesses(void)
 
             cur->next = NULL;
             cur->blockedUntil = -1;
+
+            /* Phase 2: Person 3 - Log the completion exactly when it wakes up! */
+            // The address that caused the fault is the one right behind our current index
+            int faultingAddress = cur->requests[cur->nextRequestIndex - 1].address;
+            mmu_log_completion(cur->id, faultingAddress, now);
             enqueueReadyProcess(cur);
         }
         else
@@ -532,6 +592,35 @@ static void accountOneClockTick(void)
      * check requests whose relative time == consumedCpuTime here, then pass
      * each due request to handleRunningMemoryAccess(address, operation).
      */
+    /* Phase 2 integration point for Person 3 */
+    while (runningProcess != NULL && runningProcess->nextRequestIndex < runningProcess->requestCount)
+    {
+        struct MemoryRequest *req = &runningProcess->requests[runningProcess->nextRequestIndex];
+        
+        if (req->time == runningProcess->consumedCpuTime)
+        {
+            // SAVE A SAFE REFERENCE before we do the memory access
+            struct PCB *activeProc = runningProcess; 
+            
+            handleRunningMemoryAccess(req->address, req->operation);
+            
+            // Increment using our safe reference, so it doesn't crash if runningProcess became NULL
+            activeProc->nextRequestIndex++; 
+            
+            // If the process faulted, runningProcess is now NULL. Break out safely.
+            if (runningProcess == NULL) {
+                return; 
+            }
+        }
+        else if (req->time > runningProcess->consumedCpuTime)
+        {
+            break; 
+        }
+        else
+        {
+            runningProcess->nextRequestIndex++;
+        }
+    }
 }
 
 static void preemptIfNeeded(void)
@@ -542,8 +631,15 @@ static void preemptIfNeeded(void)
     if (runningProcess->remaining <= 0)
         return;
 
-    if (rrCounter >= rrQuantum)
+  if (rrCounter >= rrQuantum)
     {
+        /* Phase 2: Person 3 - K-Quantum R-Bit Reset */
+        quantumsSinceLastClear++;
+        if (quantumsSinceLastClear >= kQuantumsToClear) {
+            mmu_clear_reference_bits();
+            quantumsSinceLastClear = 0;
+        }
+
         stopAndRequeueRunningProcess();
         beginContextSwitch(popHead(&readyQueue));
     }
@@ -561,6 +657,7 @@ static int parseSchedulerArgs(int argc, char *argv[])
     {
         schedulerAlgo = ALGO_RR;
         rrQuantum = atoi(argv[2]);
+        kQuantumsToClear = atoi(argv[3]);
         if (rrQuantum <= 0)
         {
             perror("INVALID RR QUANTUM!");

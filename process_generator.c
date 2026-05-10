@@ -14,11 +14,15 @@ int main(int argc, char * argv[])
 
     /* Phase 2 is RR-only, so startup asks only for the RR quantum. */
     int quantum = 0;
+    int k_quantums = 0;
     printf("Enter RR quantum: ");
     scanf("%d", &quantum);
-    
+    printf("Enter K (number of quantums to clear R bits): "); // Add this
+    scanf("%d", &k_quantums);
     char quantumStr[10];
+    char kStr[10];
     sprintf(quantumStr, "%d", quantum);
+    sprintf(kStr, "%d", k_quantums);
 
     FILE *keyFile = fopen("keyfile", "a");
     if (keyFile != NULL)
@@ -63,7 +67,7 @@ int main(int argc, char * argv[])
     }
     else if (schedulerId == 0)
     {
-        execl("./scheduler.out", "scheduler.out", "RR", quantumStr, NULL);
+        execl("./scheduler.out", "scheduler.out", "RR", quantumStr, kStr, NULL);
         perror("ERROR STARTING SCHEDULER!");
         return 1;
     }
@@ -105,7 +109,7 @@ int main(int argc, char * argv[])
         while(getClk() < msg.arrival);
 
         msgsnd(msgq_id, &msg, sizeof(msg) - sizeof(long), !IPC_NOWAIT);
-        printf("Sent process %d at time %d\n", msg.id, getClk());
+        // printf("Sent process %d at time %d\n", msg.id, getClk());
     }
 
     fclose(pFile);

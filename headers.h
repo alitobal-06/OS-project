@@ -80,3 +80,4 @@ int mmu_access(int processId, int virtualAddress, char operation);
 int mmu_handle_page_fault(int processId, int virtualAddress, char operation, int loadTime);
 void mmu_clear_reference_bits(void);
 void mmu_finish_process(int processId);
+void mmu_log_completion(int processId, int virtualAddress, int time);

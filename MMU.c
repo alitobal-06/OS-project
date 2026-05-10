@@ -1,4 +1,5 @@
 #include <stdio.h>
+int getClk(void);
 /* Total simulated physical memory size from the Phase 2 document. */
 #define RAM_SIZE 512
 
@@ -599,18 +600,17 @@ int mmu_handle_page_fault(int processId, int virtualAddress, char operation, int
 
     diskAddress = pageTable->diskBase + virtualPageNumber;
     mapDataPage(pageTable, processId, virtualPageNumber, frameNumber, operation);
-    fprintf(memoryLog,
-            "At time %d disk address %d for process %d is loaded into memory page %d.\n",
-            loadTime,
-            diskAddress,
-            processId,
-            frameNumber);
-
-    fclose(memoryLog);
-
     diskDelay = DISK_ACCESS_TIME;
     if (victimModified)
         diskDelay += DISK_ACCESS_TIME;
+    // fprintf(memoryLog,
+    //         "At time %d disk address %d for process %d is loaded into memory page %d.\n",
+    //         loadTime + diskDelay,
+    //         diskAddress,
+    //         processId,
+    //         frameNumber);
+
+    fclose(memoryLog);
 
     return diskDelay;
 }
@@ -683,16 +683,28 @@ void mmu_finish_process(int processId)
 int mmu_start_process(int processId, int pageCount, int diskBase)
 {
     int pageTableFrame = mmu_allocate_page_table(processId, pageCount);
-
     if (pageTableFrame == INVALID_FRAME_NUMBER)
         return INVALID_FRAME_NUMBER;
 
-    if (mmu_load_first_page(processId, diskBase) == INVALID_FRAME_NUMBER)
+    int firstPageFrame = mmu_load_first_page(processId, diskBase);
+    if (firstPageFrame == INVALID_FRAME_NUMBER)
         return INVALID_FRAME_NUMBER;
+
+    // Person 3 Fix: Log the initial allocations to match TA sample
+    FILE *memoryLog = fopen("memory.log", "a");
+    if (memoryLog != NULL)
+    {
+        fprintf(memoryLog, "Free Physical page %d allocated\n", pageTableFrame);
+        fprintf(memoryLog, "Free Physical page %d allocated\n", firstPageFrame);
+        // Note: getClk() isn't directly in MMU.c, so we assume time matches arrival for now, 
+        // or you can pass the clock time into this function if you want exact TA clock matching.
+        fprintf(memoryLog, "At time %d disk address %d for process %d is loaded into memory page %d.\n",
+                getClk(), diskBase, processId, firstPageFrame);
+        fclose(memoryLog);
+    }
 
     return pageTableFrame;
 }
-
 /*
  * Lets the scheduler or later MMU functions retrieve a process page table.
  * Returns NULL if mmu_allocate_page_table was not called for this process yet.
@@ -705,4 +717,19 @@ ProcessPageTable *mmu_get_page_table(int processId)
         return NULL;
 
     return &processPageTables[slot];
+}
+void mmu_log_completion(int processId, int virtualAddress, int time) {
+    ProcessPageTable *pageTable = mmu_get_page_table(processId);
+    if (pageTable == NULL) return;
+
+    int virtualPageNumber = virtualAddress / 16; // 16 is PAGE_SIZE
+    int diskAddress = pageTable->diskBase + virtualPageNumber;
+    int frameNumber = pageTable->entries[virtualPageNumber].frameNumber;
+
+    FILE *memoryLog = fopen("memory.log", "a");
+    if (memoryLog != NULL) {
+        fprintf(memoryLog, "At time %d disk address %d for process %d is loaded into memory page %d.\n",
+                time, diskAddress, processId, frameNumber);
+        fclose(memoryLog);
+    }
 }
