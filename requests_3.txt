@@ -1,2 +1,2 @@
-#time addressInBinary r/w
-1 0 w
+#time	address	r/w
+0	0	w

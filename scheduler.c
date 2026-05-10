@@ -284,7 +284,7 @@ static void loadProcessRequests(struct PCB *process) {
             }
             
             process->requests[idx].time = time;
-            // Convert binary string to integer
+            /* Project document format: virtual addresses are binary text. */
             process->requests[idx].address = (int)strtol(binAddr, NULL, 2);
             process->requests[idx].operation = op;
             
@@ -597,7 +597,12 @@ static void accountOneClockTick(void)
     {
         struct MemoryRequest *req = &runningProcess->requests[runningProcess->nextRequestIndex];
         
-        if (req->time == runningProcess->consumedCpuTime)
+        /*
+         * Request times are zero-based CPU-time slots in the TA samples:
+         * time 0 is checked after the first consumed tick, time 1 after the
+         * second consumed tick, and so on.
+         */
+        if (req->time < runningProcess->consumedCpuTime)
         {
             // SAVE A SAFE REFERENCE before we do the memory access
             struct PCB *activeProc = runningProcess; 
@@ -612,13 +617,9 @@ static void accountOneClockTick(void)
                 return; 
             }
         }
-        else if (req->time > runningProcess->consumedCpuTime)
-        {
-            break; 
-        }
         else
         {
-            runningProcess->nextRequestIndex++;
+            break; 
         }
     }
 }
@@ -647,7 +648,7 @@ static void preemptIfNeeded(void)
 
 static int parseSchedulerArgs(int argc, char *argv[])
 {
-    if (argc < 3)
+    if (argc < 4)
     {
         perror("INVALID SCHEDULER ARGUMENTS!");
         return 0;
